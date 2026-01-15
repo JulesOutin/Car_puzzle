@@ -463,6 +463,7 @@ export class Game extends Phaser.Scene {
         car.baseScale = baseScale;
         car.setScale(baseScale);
         car._scaleTween = null;
+        car._scaleLocked = false;
 
         // Set car rotation based on direction
         if (carData.direction === 'horizontal') {
@@ -555,6 +556,8 @@ export class Game extends Phaser.Scene {
                 clickedCar.setScale(clickedCar.baseScale);
             }
 
+            // lock while tween active to avoid re-entrancy
+            clickedCar._scaleLocked = true;
             clickedCar._scaleTween = this.tweens.add({
                 targets: clickedCar,
                 scaleX: clickedCar.baseScale * 1.05,
@@ -565,8 +568,23 @@ export class Game extends Phaser.Scene {
                 onComplete: () => {
                     if (clickedCar && clickedCar.setScale) clickedCar.setScale(clickedCar.baseScale);
                     clickedCar._scaleTween = null;
+                    clickedCar._scaleLocked = false;
                 }
             });
+        }
+    }
+
+    update() {
+        // Clamp car scales to avoid accidental growth
+        const MAX_SCALE_FACTOR = 1.2;
+        for (const car of this.cars) {
+            if (!car) continue;
+            const max = car.baseScale * MAX_SCALE_FACTOR;
+            // Phaser sprites expose scaleX/scaleY
+            if (car.scaleX > max || car.scaleY > max) {
+                car.setScale(car.baseScale);
+                if (this.isDebug) console.warn(`Clamped scale of car at (${car.gridX},${car.gridY})`);
+            }
         }
     }
 
@@ -663,7 +681,11 @@ export class Game extends Phaser.Scene {
                 x: newPixelX,
                 y: newPixelY,
                 duration: 120 + Math.abs(moved) * 40,
-                ease: 'Power2'
+                ease: 'Power2',
+                onComplete: () => {
+                    // After movement animation completes, check if car should exit
+                    try { this.checkCarShouldExit(car); } catch (e) { }
+                }
             });
 
             // Count the move as number of cells moved (absolute)
