@@ -458,7 +458,11 @@ export class Game extends Phaser.Scene {
 
         const car = this.add.image(pixelX, pixelY, carData.image);
         car.setInteractive();
-        car.setScale(3);  // Adjusted for better fit the grid
+        // Use a stable base scale so pointer effects don't accumulate
+        const baseScale = 3;
+        car.baseScale = baseScale;
+        car.setScale(baseScale);
+        car._scaleTween = null;
 
         // Set car rotation based on direction
         if (carData.direction === 'horizontal') {
@@ -544,12 +548,24 @@ export class Game extends Phaser.Scene {
             this.dragStartX = pointer.x;
             this.dragStartY = pointer.y;
 
-            this.tweens.add({
+            // Prevent stacking tweens: stop any existing scale tween and reset
+            if (clickedCar._scaleTween) {
+                clickedCar._scaleTween.stop();
+                clickedCar._scaleTween = null;
+                clickedCar.setScale(clickedCar.baseScale);
+            }
+
+            clickedCar._scaleTween = this.tweens.add({
                 targets: clickedCar,
-                scale: { from: clickedCar.scale, to: clickedCar.scale * 1.05 },
+                scaleX: clickedCar.baseScale * 1.05,
+                scaleY: clickedCar.baseScale * 1.05,
                 duration: 100,
                 yoyo: true,
-                ease: 'Sine.Out'
+                ease: 'Sine.Out',
+                onComplete: () => {
+                    if (clickedCar && clickedCar.setScale) clickedCar.setScale(clickedCar.baseScale);
+                    clickedCar._scaleTween = null;
+                }
             });
         }
     }
