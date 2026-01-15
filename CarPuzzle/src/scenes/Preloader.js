@@ -29,7 +29,8 @@ export class Preloader extends Phaser.Scene {
 
     preload() {
         //  Load the assets for the game
-        this.load.setPath('assets');
+        // Assets are located inside the CarPuzzle folder relative to index.html
+        this.load.setPath('./CarPuzzle/assets/');
 
         this.load.image('tile', 'overpass.png');
         this.load.image('exit_sign', 'street_light.png');
