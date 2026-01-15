@@ -5,13 +5,14 @@ export class Game extends Phaser.Scene {
         this.gridSize = 6; // 6x6 grid
         this.tileSize = 50; // Size of each grid cell
         this.cars = [];
+        this.obstacles = [];
         this.selectedVehicle = null;
         this.level = 1;
         this.grid = [];
         this.isDebug = false;
         this.score = 0;
         this.moves = 0;
-        this.maxLevel = 3;
+        this.maxLevel = 6;
     }
 
     init(data) {
@@ -167,6 +168,25 @@ export class Game extends Phaser.Scene {
         container.setRotation(Phaser.Math.DegToRad(90));
     }
 
+    createObstacleAtCell(x, y) {
+        // single-cell obstacle (uses fire_hydrant asset)
+        if (x < 0 || y < 0 || x >= this.gridSize || y >= this.gridSize) return null;
+        if (this.grid[y][x]) return null; // already occupied
+
+        const pixelX = this.boardOffsetX + (x + 0.5) * this.tileSize;
+        const pixelY = this.boardOffsetY + (y + 0.5) * this.tileSize;
+
+        const obs = this.add.image(pixelX, pixelY, 'fire_hydrant');
+        obs.setOrigin(0.5);
+        obs.setScale(2);
+        obs.setDepth(50);
+
+        // mark grid as occupied by obstacle
+        this.grid[y][x] = { obstacle: true, sprite: obs };
+        this.obstacles.push(obs);
+        return obs;
+    }
+
     // Fill the remaining empty cells with the maximum number of cars possible.
     populateMaxCars() {
         const images = ['red_car', 'blue_car', 'yellow_car', 'striped_red_car', 'police_car', 'grey_car'];
@@ -260,6 +280,15 @@ export class Game extends Phaser.Scene {
             case 3:
                 levelData = this.getLevelThree();
                 break;
+            case 4:
+                levelData = this.getLevelFour();
+                break;
+            case 5:
+                levelData = this.getLevelFive();
+                break;
+            case 6:
+                levelData = this.getLevelSix();
+                break;
             default:
                 levelData = this.getLevelOne(); // Default to level 1
                 break;
@@ -315,7 +344,19 @@ export class Game extends Phaser.Scene {
             }
         }
 
-        console.error(`Could not place car ${carData.image} of size ${carData.size} on the board; skipping`);
+        // If we couldn't place the car, add an obstacle on any free cell (to block that spot)
+        for (let y = 0; y < this.gridSize; y++) {
+            for (let x = 0; x < this.gridSize; x++) {
+                if (!this.grid[y][x]) {
+                    console.warn(`Could not place car ${carData.image}; placing obstacle at (${x},${y})`);
+                    this.createObstacleAtCell(x, y);
+                    return null;
+                }
+            }
+        }
+
+        // Board is completely full and no obstacle can be placed
+        console.error(`Could not place car ${carData.image} of size ${carData.size} on the board; board full`);
         return null;
     }
 
@@ -367,6 +408,36 @@ export class Game extends Phaser.Scene {
             { x: 4, y: 0, size: 2, direction: 'vertical', image: 'grey_car' },
             { x: 5, y: 3, size: 2, direction: 'vertical', image: 'police_car' },
             { x: 2, y: 1, size: 2, direction: 'horizontal', image: 'yellow_car' }
+        ];
+    }
+
+    getLevelFour() {
+        return [
+            { x: 0, y: 2, size: 2, direction: 'horizontal', image: 'red_car', isTarget: true },
+            { x: 2, y: 0, size: 3, direction: 'vertical', image: 'police_car' },
+            { x: 1, y: 3, size: 2, direction: 'horizontal', image: 'blue_car' },
+            { x: 4, y: 1, size: 2, direction: 'vertical', image: 'yellow_car' },
+            { x: 3, y: 4, size: 2, direction: 'horizontal', image: 'grey_car' }
+        ];
+    }
+
+    getLevelFive() {
+        return [
+            { x: 1, y: 2, size: 2, direction: 'horizontal', image: 'striped_red_car', isTarget: true },
+            { x: 0, y: 0, size: 3, direction: 'vertical', image: 'police_car' },
+            { x: 3, y: 0, size: 2, direction: 'vertical', image: 'blue_car' },
+            { x: 4, y: 3, size: 2, direction: 'horizontal', image: 'red_car' },
+            { x: 5, y: 1, size: 2, direction: 'vertical', image: 'grey_car' }
+        ];
+    }
+
+    getLevelSix() {
+        return [
+            { x: 0, y: 1, size: 2, direction: 'vertical', image: 'yellow_car' },
+            { x: 2, y: 1, size: 2, direction: 'horizontal', image: 'red_car', isTarget: true },
+            { x: 4, y: 0, size: 3, direction: 'vertical', image: 'police_car' },
+            { x: 0, y: 4, size: 2, direction: 'horizontal', image: 'blue_car' },
+            { x: 3, y: 3, size: 2, direction: 'horizontal', image: 'striped_red_car' }
         ];
     }
 
@@ -501,26 +572,19 @@ export class Game extends Phaser.Scene {
 
         const dragX = pointer.x - this.dragStartX;
         const dragY = pointer.y - this.dragStartY;
-
-        const dragThreshold = this.tileSize * 0.5; // Half a tile size threshold for movement
-
-        // Only allow movement along the car's orientation
+        // Compute how many cells the drag corresponds to (integer)
         if (this.selectedVehicle.direction === 'horizontal') {
-            // Only process horizontal movement for horizontal cars
-            if (Math.abs(dragX) >= dragThreshold) {
-                const cellsMoved = Math.sign(dragX); // Move 1 cell at a time in the drag direction
-                this.tryMoveSelectedCar(cellsMoved, 0);
-
+            const cells = Math.trunc(dragX / this.tileSize);
+            if (cells !== 0) {
+                this.tryMoveSelectedCar(cells, 0);
+                // allow accumulating further drag after moving
                 this.dragStartX = pointer.x;
                 this.dragStartY = pointer.y;
             }
         } else { // vertical
-            // Only process vertical movement for vertical cars
-            if (Math.abs(dragY) >= dragThreshold) {
-                const cellsMoved = Math.sign(dragY); // Move 1 cell at a time in the drag direction
-                this.tryMoveSelectedCar(0, cellsMoved);
-
-                // Reset drag start position
+            const cells = Math.trunc(dragY / this.tileSize);
+            if (cells !== 0) {
+                this.tryMoveSelectedCar(0, cells);
                 this.dragStartX = pointer.x;
                 this.dragStartY = pointer.y;
             }
@@ -537,20 +601,39 @@ export class Game extends Phaser.Scene {
 
     tryMoveSelectedCar(deltaX, deltaY) {
         const car = this.selectedVehicle;
+        if (!car) return;
 
-        const newGridX = car.gridX + deltaX;
-        const newGridY = car.gridY + deltaY;
+        // We allow multi-cell moves: move step by step until blocked or requested distance reached
+        let moved = 0;
 
-        car.lastMoveDirection = { x: deltaX, y: deltaY };
+        if (deltaX !== 0) {
+            const step = Math.sign(deltaX);
+            for (let i = 0; i < Math.abs(deltaX); i++) {
+                const nx = car.gridX + step;
+                if (!this.isValidMove(car, nx, car.gridY)) break;
+                // apply single step
+                this.updateGridOccupancy(car, true);
+                car.gridX = nx;
+                this.updateGridOccupancy(car);
+                moved += step;
+            }
+            car.lastMoveDirection = { x: Math.sign(moved) || 0, y: 0 };
+        } else if (deltaY !== 0) {
+            const step = Math.sign(deltaY);
+            for (let i = 0; i < Math.abs(deltaY); i++) {
+                const ny = car.gridY + step;
+                if (!this.isValidMove(car, car.gridX, ny)) break;
+                this.updateGridOccupancy(car, true);
+                car.gridY = ny;
+                this.updateGridOccupancy(car);
+                moved += step;
+            }
+            car.lastMoveDirection = { x: 0, y: Math.sign(moved) || 0 };
+        }
 
-        if (this.isValidMove(car, newGridX, newGridY)) {
-            this.updateGridOccupancy(car, true);
-
-            car.gridX = newGridX;
-            car.gridY = newGridY;
-
+        if (moved !== 0) {
+            // Compute final pixel position
             let newPixelX, newPixelY;
-
             if (car.direction === 'horizontal') {
                 newPixelX = this.boardOffsetX + (car.gridX + car.size / 2) * this.tileSize;
                 newPixelY = this.boardOffsetY + (car.gridY + 0.5) * this.tileSize;
@@ -563,21 +646,17 @@ export class Game extends Phaser.Scene {
                 targets: car,
                 x: newPixelX,
                 y: newPixelY,
-                duration: 150,
+                duration: 120 + Math.abs(moved) * 40,
                 ease: 'Power2'
             });
 
-            this.updateGridOccupancy(car);
-
-            // Count the move and apply small penalty
-            this.moves++;
-            this.score = Math.max(0, this.score - 1);
+            // Count the move as number of cells moved (absolute)
+            this.moves += Math.abs(moved);
+            this.score = Math.max(0, this.score - Math.abs(moved));
             if (this.movesText) this.movesText.setText(`Moves: ${this.moves}`);
             if (this.scoreText) this.scoreText.setText(`Score: ${this.score}`);
 
-            if (this.isDebug) {
-                this.debugLogGridState();
-            }
+            if (this.isDebug) this.debugLogGridState();
         }
     }
 
