@@ -265,7 +265,12 @@ export class Game extends Phaser.Scene {
         this.cars.forEach(car => car.destroy());
         this.cars = [];
 
+        // Clear grid and remove any previous obstacles from the scene
         this.initGrid();
+        if (this.obstacles && this.obstacles.length) {
+            this.obstacles.forEach(o => { try { o.destroy(); } catch (e) { } });
+        }
+        this.obstacles = [];
 
         // Define level data (car positions, orientations, and sizes)
         let levelData;
@@ -344,9 +349,14 @@ export class Game extends Phaser.Scene {
             }
         }
 
-        // If we couldn't place the car, add an obstacle on any free cell (to block that spot)
+        // If we couldn't place the car, add an obstacle on any free cell (but avoid blocking the exit cell)
+        // For even-sized grids, use the lower-middle row to match existing levels (e.g. row 2 for gridSize=6)
+        const exitRow = Math.floor((this.gridSize - 1) / 2);
         for (let y = 0; y < this.gridSize; y++) {
             for (let x = 0; x < this.gridSize; x++) {
+                // avoid placing on the right-edge exit cell (middle row) or left-edge exit cell
+                if (x === this.gridSize - 1 && y === exitRow) continue;
+                if (x === 0 && y === exitRow) continue;
                 if (!this.grid[y][x]) {
                     console.warn(`Could not place car ${carData.image}; placing obstacle at (${x},${y})`);
                     this.createObstacleAtCell(x, y);
@@ -355,7 +365,7 @@ export class Game extends Phaser.Scene {
             }
         }
 
-        // Board is completely full and no obstacle can be placed
+        // Board is completely full and no appropriate obstacle position available
         console.error(`Could not place car ${carData.image} of size ${carData.size} on the board; board full`);
         return null;
     }
@@ -728,39 +738,46 @@ export class Game extends Phaser.Scene {
     }
 
     checkCarShouldExit(car) {
-        // Only handle exit if we have a last move direction
-        if (!car.lastMoveDirection) return;
+        // More permissive exit checks with debug logging
+        const exitRow = Math.floor((this.gridSize - 1) / 2);
+        const mv = car.lastMoveDirection || { x: 0, y: 0 };
+        const deltaX = mv.x; const deltaY = mv.y;
 
-        const { x: deltaX, y: deltaY } = car.lastMoveDirection;
+        if (this.isDebug) {
+            console.log(`checkCarShouldExit: car at (${car.gridX},${car.gridY}), size=${car.size}, dir=${car.direction}, lastMove=(${deltaX},${deltaY}), isTarget=${car.isTarget}`);
+        }
 
-        // Check if car can exit based on its position and last move direction
         if (car.direction === 'horizontal') {
-            // Check if moving right and at/near right edge
-            if (deltaX > 0 && car.gridX + car.size === this.gridSize) {
+            // If car is at or beyond right edge and moved right (or is target at exit row), exit right
+            if ((deltaX > 0 || (car.isTarget && car.gridY === exitRow)) && (car.gridX + car.size >= this.gridSize)) {
+                if (this.isDebug) console.warn('Exiting right');
                 this.handleCarExit(car, { x: 1, y: 0 });
                 return true;
             }
-            // Check if moving left and at/near left edge
-            else if (deltaX < 0 && car.gridX === 0) {
+
+            // If car is at left edge and moved left, exit left
+            if (deltaX < 0 && car.gridX <= 0) {
+                if (this.isDebug) console.warn('Exiting left');
                 this.handleCarExit(car, { x: -1, y: 0 });
                 return true;
             }
         } else { // vertical
-            // Check if moving down and at/near bottom edge
-            if (deltaY > 0 && car.gridY + car.size === this.gridSize) {
+            if (deltaY > 0 && car.gridY + car.size >= this.gridSize) {
+                if (this.isDebug) console.warn('Exiting down');
                 this.handleCarExit(car, { x: 0, y: 1 });
                 return true;
             }
-            // Check if moving up and at/near top edge
-            else if (deltaY < 0 && car.gridY === 0) {
+            if (deltaY < 0 && car.gridY <= 0) {
+                if (this.isDebug) console.warn('Exiting up');
                 this.handleCarExit(car, { x: 0, y: -1 });
                 return true;
             }
         }
 
-        // Special case for target car exiting through designated exit
+        // Still allow target car to exit if it is positioned exactly at the exit cell
         if (car.isTarget && this.isCarAtExit(car)) {
-            this.handleCarExit(car, { x: 1, y: 0 }); // Target car always exits to the right
+            if (this.isDebug) console.warn('Target car at exit cell - forcing exit right');
+            this.handleCarExit(car, { x: 1, y: 0 });
             return true;
         }
 
@@ -768,9 +785,10 @@ export class Game extends Phaser.Scene {
     }
 
     isCarAtExit(car) {
-        // Special exit condition for target car (usually middle-right exit)
+        // Special exit condition for target car (middle row exit by default)
         if (car.isTarget && car.direction === 'horizontal') {
-            return car.gridX + car.size === this.gridSize && car.gridY === 2; // Exit at position (6,2)
+            const exitRow = Math.floor(this.gridSize / 2);
+            return car.gridX + car.size === this.gridSize && car.gridY === exitRow;
         }
         return false;
     }
